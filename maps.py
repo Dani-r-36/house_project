@@ -17,9 +17,13 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # OAuth scope for Google Maps Places API (New)
 SCOPES = ["https://www.googleapis.com/auth/maps-platform.places"]
+DEBUG = True
 
 
 def get_places_service(client_secrets_file="creds.json", token_file="token.json"):
@@ -27,10 +31,14 @@ def get_places_service(client_secrets_file="creds.json", token_file="token.json"
     Authenticates and builds the service client for the Places API (v1).
     """
     creds = None
+    if DEBUG:
+        print(f"[DEBUG] get_places_service: looking for token file '{token_file}'")
     
     # Load previously saved access/refresh tokens
     if os.path.exists(token_file):
         creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+        if DEBUG:
+            print(f"[DEBUG] get_places_service: loaded creds from '{token_file}' -> {creds is not None}")
         
     print("creds are ", creds)
     
@@ -98,8 +106,15 @@ HEADERS = {
 MAX_DISTANCE_MILES = 3.0
 
 def search_places(payload, search_url):
+    if DEBUG:
+        print(f"[DEBUG] search_places: url={search_url} payload={payload}")
     res = requests.post(search_url, json=payload, headers=HEADERS)
-    return res.json().get("places", [])
+    if DEBUG:
+        print(f"[DEBUG] search_places: status={res.status_code} content_type={res.headers.get('Content-Type')}")
+    places = res.json().get("places", [])
+    if DEBUG:
+        print(f"[DEBUG] search_places: found {len(places)} places")
+    return places
 
 # def combination_places (places: list, location: str):
 #     valid_clusters = []
@@ -131,6 +146,8 @@ def search_places(payload, search_url):
 def combination_places (items_config, max_distance_miles):
     valid_clusters = []
     brand_results = []
+    if DEBUG:
+        print(f"[DEBUG] combination_places: starting with {len(items_config)} search items and threshold {max_distance_miles} miles")
     for item in items_config:
         search_type = item.get("type", "TEXT")
         payload = item.get("payload")
@@ -142,17 +159,22 @@ def combination_places (items_config, max_distance_miles):
         else:
             places = []
 
+        if DEBUG:
+            print(f"[DEBUG] combination_places: item type={search_type}, results={len(places)}")
         if places:
             brand_results.append(places)
     if not brand_results:
+        if DEBUG:
+            print("[DEBUG] combination_places: no results found for any item")
         return []
+    if DEBUG:
+        print(f"[DEBUG] combination_places: building combinations from {len(brand_results)} result groups")
     all_combinations =  itertools.product(*brand_results)
     for combo in all_combinations:
         coords = [
             (p["location"]["latitude"], p["location"]["longitude"])
             for p in combo
         ]
-
         # Verify if every pair in this cluster is within distance threshold
         is_valid = True
         for c1, c2 in itertools.combinations(coords, 2):
@@ -163,11 +185,15 @@ def combination_places (items_config, max_distance_miles):
         # 3. Store structured match if valid
         if is_valid:
             valid_clusters.append(combo)
+    if DEBUG:
+        print(f"[DEBUG] combination_places: valid cluster count={len(valid_clusters)}")
     return valid_clusters
+
 
 geolocator = Nominatim(user_agent="houses")
 location = geolocator.geocode("Merton, London")
-print(location.latitude, location.longitude)
+if DEBUG:
+    print(f"[DEBUG] geocode lookup for 'Merton, London': lat={location.latitude}, lon={location.longitude}")
 """if they ask i want a school and morleys and transport links -? """
 search_items = [
     {
@@ -197,7 +223,12 @@ search_items = [
 valid_clusters = combination_places(search_items, max_distance_miles=3.0)
 
 # Display results
+limiter = 6
+current = 0
 for cluster in valid_clusters:
+    current += 1
+    if current > limiter:
+        break
     print("--- Found Cluster ---")
     for place in cluster:
         name = place.get("displayName", {}).get("text")

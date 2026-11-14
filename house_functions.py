@@ -7,7 +7,6 @@ from rapidfuzz import fuzz, process, utils
 import itertools
 import string
 from geopy.geocoders import Nominatim
-from datetime import datetime
 import ast
 from dotenv import load_dotenv
 
@@ -38,6 +37,11 @@ def filter_house_df(location_dict):
         ) if Postcode is not None else mask
     return (houses_df[mask], original_df) if Borough or Town_City or County or Postcode else (None, None)
 
+# def get_houses_postcode(filtered_df):
+#     if filtered_df is not None and not filtered_df.empty:
+#         set(filtered_df["Postcode"].str.replace(" ", "", regex=False).str.upper().unique().tolist())
+#     return []
+
 def load_houses_data(file_path):
     houses_df = pd.read_csv(file_path)
     return houses_df
@@ -67,7 +71,7 @@ def serach(place_query, house_df_borough_list, house_df_town_list, house_df_coun
     matched_place = []
     print(f"place_query is {set(place_query)}")
     for place in set(place_query):
-        place = re.sub(r'[^\w\s]', '', place).strip().upper()
+        place = re.sub(r'[^\w\s&]', '', place).strip().upper()
         if not place: continue
         if re.match(OUTWARD_CODE, place):
             print(f"{place} hit regex")
@@ -151,7 +155,8 @@ def get_locations(query):
         return check
     return []
 
-# query = "Colliers Wood, London"
+# query = "Southwark, London"
+# print(get_locations(query))
 # place_query = [x.strip() for x in query.split(",") if x.strip()]
 # houses_df = load_houses_data("/Users/danishanrahulan/Downloads/house_prices_formated.csv")
 # house_df_borough_list, house_df_town_list, house_df_county_list, house_df_outward_code_list, house_df_postcode_list = df_prerequists(houses_df)
@@ -251,7 +256,6 @@ def get_crimes_in_polygon(poly, date="2025-01"):
     return res.json()
 
 def get_postcode_losas(crimes):
-    print(crimes)
     geolocations = [
         {
             "longitude": float(crime['location']['longitude']),
@@ -274,10 +278,18 @@ def get_postcode_losas(crimes):
     return all_lsoas
 
 def crime_calcualtion(total_crimes_year, pop_df,lsoa_column, all_lsoas):
-    unique_locations = {str(x).lower() for x in all_lsoas}
-    unique_locations = {x.lower() for x in unique_locations}
+    print("inside crime calcuation")
+    if isinstance(all_lsoas,list):
+        unique_locations = {str(x).lower() for x in all_lsoas}
+    else:
+        unique_locations = str(all_lsoas).lower()
     filtered_po = pop_df.loc[pop_df[lsoa_column].str.lower().isin(unique_locations)]
+    print("Requested LSOAs:", unique_locations)
+    print("Matched rows:")
+    print(filtered_po[[lsoa_column, "Total"]])
     total_populations_2024 = pd.to_numeric(filtered_po["Total"].str.replace(",", "", regex=False)).sum()
+    print("Population:", total_populations_2024)
+    print("Crimes:", total_crimes_year)
     return (total_crimes_year/total_populations_2024) *1000
 
 def population_data(year):
@@ -329,10 +341,24 @@ def crimes_trend(location, back_year, last_month):
         lsoas_locations = get_postcode_losas(all_crimes_year)
         pop_df = population_data(year)
         crimes_that_year = crime_calcualtion(len(all_crimes_year), pop_df, 'LSOA 2021 Name', lsoas_locations)
-        crimes_100_year.append(crimes_that_year)
-        print(crimes_that_year)
+        crimes_100_year.append(crimes_that_year) 
     return ([j-i for i, j in zip(crimes_100_year[:-1], crimes_100_year[1:])] , crimes_100_year)
 
 # year = int(datetime.now().year) -3
 # month = int(datetime.now().month)
 # crime_difference_per_year, crime_each_year = crimes_trend("Elephant & castle, London", year, month)
+
+"""postcode extraction list"""
+
+def longitude_latitude_from_postcode(postcode):
+    url = f"https://api.postcodes.io/postcodes/{postcode}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        if data['status'] == 200:
+            return data['result']['longitude'], data['result']['latitude']
+    return None, None
+
+def get_houses_postcode(filtered_df):
+    if filtered_df is not None and not filtered_df.empty:
+        return set(filtered_df["Postcode"].str.upper().unique().tolist())
